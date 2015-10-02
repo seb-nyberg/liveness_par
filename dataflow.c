@@ -1,4 +1,3 @@
-#include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -10,14 +9,20 @@
 #include "list.h"
 #include "set.h"
 
+typedef struct thrargs_t thrargs_t;
 typedef struct vertex_t	vertex_t;
 typedef struct task_t	task_t;
 
+/* targs_t: thread args */
+struct thrargs_t {
+  list_t* worklist;
+  size_t index;
+};
+
 /* cfg_t: a control flow graph. */
 struct cfg_t {
-	size_t			n;		/* number of vertices		*/
-	size_t			s;		/* width of bitvectors		*/
-	size_t			max_succ;	/* max number of successors	*/
+	size_t			nvertex;	/* number of vertices		*/
+	size_t			nsymbol;	/* width of bitvectors		*/
 	vertex_t*		vertex;		/* array of vertex		*/
 };
 
@@ -30,7 +35,6 @@ struct vertex_t {
 	vertex_t**		succ;		/* successor vertices 		*/
 	list_t*			pred;		/* predecessor vertices		*/
 	bool			listed;		/* on worklist			*/
-	int			dfnum;		/* depth first search number	*/
 };
 
 static void clean_vertex(vertex_t* v);
@@ -45,9 +49,8 @@ cfg_t* new_cfg(size_t nvertex, size_t nsymbol, size_t max_succ)
 	if (cfg == NULL)
 		error("out of memory");
 
-	cfg->n = nvertex;
-	cfg->s = nsymbol;
-	cfg->max_succ = max_succ;
+	cfg->nvertex = nvertex;
+	cfg->nsymbol = nsymbol;
 
 	cfg->vertex = calloc(nvertex, sizeof(vertex_t));
 	if (cfg->vertex == NULL)
@@ -90,7 +93,7 @@ void free_cfg(cfg_t* cfg)
 {
 	size_t		i;
 
-	for (i = 0; i < cfg->n; i += 1)
+	for (i = 0; i < cfg->nvertex; i += 1)
 		clean_vertex(&cfg->vertex[i]);
 	free(cfg->vertex);
 	free(cfg);
@@ -118,20 +121,77 @@ void setbit(cfg_t* cfg, size_t v, set_type_t type, size_t index)
 	set(cfg->vertex[v].set[type], index);
 }
 
+void* work(void *args)
+{
+  list_t* worklist;
+  size_t index;
+
+  worklist = ((thrargs_t*) args)->worklist;
+  index    = ((thrargs_t*) args)->index;
+
+  pthread_exit(NULL);
+}
+
 void liveness(cfg_t* cfg)
 {
-	vertex_t*	u;
-	vertex_t*	v;
-	set_t*		prev;
-	size_t		i;
-	size_t		j;
-	list_t*		worklist;
-	list_t*		p;
-	list_t*		h;
+	vertex_t*   u;
+	vertex_t*   v;
+	set_t*      prev;
+	size_t      i;
+	size_t      j;
+  size_t      rc;
+	list_t*     worklist;
+	list_t*     p;
+	list_t*     h;
+  size_t      nthread;
+  size_t      blocksize;
+  thrargs_t** ts;
+  pthread_t*  threads;
 
-	worklist	= NULL;
+  nthread = 8;
+  ts = malloc(nthread * sizeof(thrargs_t*));
+  threads = malloc(nthread * sizeof(pthread_t));
+	worklist = NULL;
 
-	for (i = 0; i < cfg->n; ++i) {
+  // initialize the thread arguments
+  for (i = 0; i < nthread; ++i) {
+    ts[i] = malloc(sizeof(thrargs_t*));
+    ts[i]->worklist = malloc(sizeof(list_t*));
+    ts[i]->worklist = NULL;
+    ts[i]->index = i;
+  }
+  
+  // Create initial worklists by iterating from
+  // [0, blocksize-1], ..., [(nthread - 1) * blocksize, nthread * blocksize]
+
+  blocksize = cfg->nvertex / nthread;
+
+  for (i = 0; i < nthread; ++i) {
+    for (j = blocksize * i; j < blocksize * (i + 1); j++) {
+      u = &cfg->vertex[j];
+
+      insert_last(&ts[i]->worklist, u);
+      u->listed = true;
+    }
+  }
+
+  // start threads
+  for (i = 0; i < nthread; ++i) {
+    rc = pthread_create(&threads[i], NULL, work, ts[i]);
+
+    if (rc)
+      error("failed to create thread");
+  }
+
+  // join threads
+  for (i = 0; i < nthread; ++i) {
+    rc = pthread_join(threads[i], NULL);
+
+    if(rc)
+      error("failed to join thread");
+  }
+
+	for (i = 0; i < cfg->nvertex; ++i) {
 		u = &cfg->vertex[i];
 
 		insert_last(&worklist, u);
@@ -157,7 +217,6 @@ void liveness(cfg_t* cfg)
 			p = h = u->pred;
 			do {
 				v = p->data;
-
 				if (!v->listed) {
 					v->listed = true;
 					insert_last(&worklist, v);
@@ -172,20 +231,20 @@ void liveness(cfg_t* cfg)
 
 void print_sets(cfg_t* cfg, FILE *fp)
 {
-        size_t          i;
-        vertex_t*       u;
+	size_t		i;
+	vertex_t*	u;
 
-        for (i = 0; i < cfg->n; ++i) {
-                u = &cfg->vertex[i];
-                fprintf(fp, "use[%zu] = ", u->index);
-                print_set(u->set[USE], fp);
-                fprintf(fp, "def[%zu] = ", u->index);
-                print_set(u->set[DEF], fp);
-                fputc('\n', fp);
-                fprintf(fp, "in[%zu] = ", u->index);
-                print_set(u->set[IN], fp);
-                fprintf(fp, "out[%zu] = ", u->index);
-                print_set(u->set[OUT], fp);
-                fputc('\n', fp);
-        }
+	for (i = 0; i < cfg->nvertex; ++i) {
+		u = &cfg->vertex[i]; 
+		fprintf(fp, "use[%zu] = ", u->index);
+		print_set(u->set[USE], fp);
+		fprintf(fp, "def[%zu] = ", u->index);
+		print_set(u->set[DEF], fp);
+		fputc('\n', fp);
+		fprintf(fp, "in[%zu] = ", u->index);
+		print_set(u->set[IN], fp);
+		fprintf(fp, "out[%zu] = ", u->index);
+		print_set(u->set[OUT], fp);
+		fputc('\n', fp);
+	}
 }

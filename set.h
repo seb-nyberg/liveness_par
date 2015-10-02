@@ -2,13 +2,15 @@
 #define set_h
 
 #include <stdbool.h>
-#include <stdio.h>
+#include <stddef.h>
 #include <inttypes.h>
 
-typedef struct {
+typedef struct set_t		set_t;
+
+struct set_t {
 	size_t		n;	/* elements in array. */
-	uint64_t	a[];
-} set_t;
+	uint64_t	a[];	/* C99 flexible array member. */
+};
 
 set_t*	new_set(size_t);
 void	free_set(set_t*);

@@ -7,14 +7,12 @@
 #include "set.h"
 #include "error.h"
 
-#define	N	(64)
-
 set_t* new_set(size_t m)
 {
 	set_t*	s;
 	size_t	n;
 
-	n = (m + N-1) / N;
+	n = (m + 63) / 64;
 	s = calloc(1, sizeof(set_t) + n * sizeof(uint64_t));
 
 	if (s == NULL)
@@ -32,7 +30,7 @@ void free_set(set_t* s)
 
 void set(set_t* s, uint64_t a)
 {
-	s->a[a / N] |= 1ULL << (a % N);
+	s->a[a / 64] |= 1ULL << (a % 64);
 }
 
 void reset(set_t* s)
@@ -63,7 +61,7 @@ void propagate(set_t* in, set_t* out, set_t* def, set_t* use)
 		
 bool test(set_t* s, uint64_t a)
 {
-	return s->a[a / N] & (1ULL << (a % N));
+	return s->a[a / 64] & (1ULL << (a % 64));
 }
 
 void print_set(set_t* s, FILE *fp)
@@ -78,7 +76,7 @@ void print_set(set_t* s, FILE *fp)
 		return;
 	}
 	fprintf(fp, "{ ");
-	for (i = 0; i < s->n * N; ++i)
+	for (i = 0; i < s->n * 64; ++i)
 		if (test(s, i))
 			fprintf(fp, "%zu ", i);
 	fprintf(fp, "}\n");

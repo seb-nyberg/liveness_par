@@ -1,30 +1,49 @@
-A		= 32
-A		= 64
 CC		= gcc
-OPT		= -g
-OPT		= -O3
-CFLAGS		= $(OPT) -maltivec -Wall -pedantic -std=c11 -m$(A) -pthread -DPPC$(A)
-LDFLAGS		= -pthread -lpthread -lm
-OBJS		= main.o list.o error.o random.o set.o dataflow.o timebase.o tbr.o sequential.o
-OUT		= a.out
 
-1: compile
-	a.out
 
-10: compile
-	a.out&&a.out&&a.out&&a.out&&a.out&&a.out&&a.out&&a.out&&a.out&&a.out
-	
-compile: $(OBJS)	
+# CFLAGS		= -Wall -pedantic -std=c99 -m32 -g
+# CFLAGS		= -m64 -g -Wall -pedantic -Werror -std=c99
+# CFLAGS		= -O3 -maltivec -Wall -pedantic -std=c99
+# CFLAGS		= -O3 -Wall -pedantic -std=c99
+CFLAGS      = -O3 -Wall -pedantic -std=c11 -m64 -pthread -D_GNU_SOURCE
+
+OBJS		= main.o list.o error.o random.o set.o dataflow.o
+
+OUT		= live
+
+LDFLAGS		= -lpthread
+
+# S=100000
+# V=100000
+# U=4
+# A=1000
+# T=4
+# P=0
+
+# The ultimate test
+# S=100000 # the range of symbol values [0, n]
+# V=100000 # vertices in the graph
+# U=4 		 # successors
+# A=1000   # nactive (different values of entries in the sets)
+# T=4      # threads
+# P=0      # print
+
+# For debugging
+S=100 # the range of symbol values [0, n]
+V=100 # vertices in the graph
+U=4   # successors for each vertex
+A=10  # max number of active (live) variables for a set
+T=4   # threads
+P=0   # print
+
+all: $(OBJS)	
 	$(CC) $(CFLAGS) $(OBJS) $(LDFLAGS) -o $(OUT)
 
-tbr.o:
-	$(CC) -m$(A) tbr.s -c
+run:
+	./$(OUT) $(S) $(V) $(U) $(A) $(T) $(P)
+	
+valgrind:
+	valgrind --tool=helgrind ./$(OUT) $(S) $(V) $(U) $(A) $(T) $(P) $(L)
 
 clean:
-	rm -f *.o a.out score cfg.dot
-
-cg: 1
-	valgrind --tool=cachegrind --I1=65536,1,128 --D1=32768,2,128 --LL=1048576,8,128 ./a.out
-
-hg: 1
-	valgrind --tool=helgrind ./a.out
+	rm -f $(OUT) $(OBJS) cfg.dot
