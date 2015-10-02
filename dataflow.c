@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <inttypes.h>
 #include <pthread.h>
+#include <string.h>
 #include "dataflow.h"
 #include "error.h"
 #include "list.h"
@@ -31,6 +32,7 @@ struct vertex_t {
 	size_t			index;		/* can be used for debugging	*/
 	set_t*			set[NSETS];	/* live in from this vertex	*/
 	set_t*			prev;		/* alternating with set[IN]	*/
+                      /* this is used to check if IN has changed */
 	size_t			nsucc;		/* number of successor vertices */
 	vertex_t**		succ;		/* successor vertices 		*/
 	list_t*			pred;		/* predecessor vertices		*/
@@ -121,13 +123,80 @@ void setbit(cfg_t* cfg, size_t v, set_type_t type, size_t index)
 	set(cfg->vertex[v].set[type], index);
 }
 
+void computeIn(vertex_t* u, list_t* worklist)
+{
+  size_t i;
+  set_t* prev;
+  list_t* p;
+  list_t* h;
+  vertex_t* v;
+
+  reset(u->set[OUT]);  //REQUIRES LOCK
+
+  for (i = 0; i < u->nsucc; ++i) { //REQUIRES LOCK
+    // LOCK u->succ[i] 
+    or(u->set[OUT], u->set[OUT], u->succ[i]->set[IN]); // REQUIRES LOCK ON U AND SUCC
+  }
+
+  // this is done to save memory
+  prev = u->prev;       // get the pointer to the old, useless in-set
+  u->prev = u->set[IN]; // save the current in-set in prev
+  u->set[IN] = prev;    // get a pointer to the old in-set for writing new data
+
+  // now the pointer u->set[IN] points to the previously used in-set
+  // and that memory is ready to be recycled in the liveness analysis
+	propagate(u->set[IN], u->set[OUT], u->set[DEF], u->set[USE]);
+
+  // if there are predecessors which need updating
+  //                     and the in-edges have changed
+  if (u->pred != NULL && !equal(u->prev, u->set[IN])) {
+
+    // make sure that the predecessors update their in-sets
+    p = u->pred; // REQUIRES LOCK ON u->pred
+    memcpy(&h, p, sizeof(vertex_t*)); 
+    v = p->data;
+
+    do {
+      if (!v->listed) {
+        v->listed = true;
+        insert_last(&worklist, v);
+      }
+
+      p = p->succ; // UNLOCK OLD P AND TRY TO LOCK NEW P
+      v = p->data;
+    } while (h != p);
+
+  }
+
+}
+
 void* work(void *args)
 {
   list_t* worklist;
   size_t index;
+  vertex_t* u;
+  size_t nvertex;
 
   worklist = ((thrargs_t*) args)->worklist;
   index    = ((thrargs_t*) args)->index;
+  nvertex = 0;
+
+  while (1) {
+
+    // LOCK U
+    u = remove_first(&worklist);
+    nvertex++;
+
+    if (u != NULL) {
+      if (u->listed) {
+        u->listed = false;
+        computeIn(u, worklist);
+      }
+    }
+    else {
+      break;
+    }
+  }
 
   pthread_exit(NULL);
 }
@@ -135,23 +204,17 @@ void* work(void *args)
 void liveness(cfg_t* cfg)
 {
 	vertex_t*   u;
-	vertex_t*   v;
-	set_t*      prev;
 	size_t      i;
 	size_t      j;
   size_t      rc;
-	list_t*     worklist;
-	list_t*     p;
-	list_t*     h;
   size_t      nthread;
   size_t      blocksize;
   thrargs_t** ts;
   pthread_t*  threads;
 
-  nthread = 8;
+  nthread = 1;
   ts = malloc(nthread * sizeof(thrargs_t*));
   threads = malloc(nthread * sizeof(pthread_t));
-	worklist = NULL;
 
   // initialize the thread arguments
   for (i = 0; i < nthread; ++i) {
@@ -161,9 +224,8 @@ void liveness(cfg_t* cfg)
     ts[i]->index = i;
   }
   
-  // Create initial worklists by iterating from
+  // create initial worklists by iterating from
   // [0, blocksize-1], ..., [(nthread - 1) * blocksize, nthread * blocksize]
-
   blocksize = cfg->nvertex / nthread;
 
   for (i = 0; i < nthread; ++i) {
@@ -191,42 +253,6 @@ void liveness(cfg_t* cfg)
       error("failed to join thread");
   }
 
-	for (i = 0; i < cfg->nvertex; ++i) {
-		u = &cfg->vertex[i];
-
-		insert_last(&worklist, u);
-		u->listed = true;
-	}
-
-	while ((u = remove_first(&worklist)) != NULL) {
-		u->listed = false;
-
-		reset(u->set[OUT]);
-
-		for (j = 0; j < u->nsucc; ++j)
-			or(u->set[OUT], u->set[OUT], u->succ[j]->set[IN]);
-
-		prev = u->prev;
-		u->prev = u->set[IN];
-		u->set[IN] = prev;
-
-		/* in our case liveness information... */
-		propagate(u->set[IN], u->set[OUT], u->set[DEF], u->set[USE]);
-
-		if (u->pred != NULL && !equal(u->prev, u->set[IN])) {
-			p = h = u->pred;
-			do {
-				v = p->data;
-				if (!v->listed) {
-					v->listed = true;
-					insert_last(&worklist, v);
-				}
-
-				p = p->succ;
-
-			} while (p != h);
-		}
-	}
 }
 
 void print_sets(cfg_t* cfg, FILE *fp)
