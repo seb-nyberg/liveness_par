@@ -91,7 +91,6 @@ int main(int argc, char** argv)
 	size_t		n;
 	size_t		max_succ;
 	cfg_t*		cfg;
-	struct cfg_t*    cfg2;
 	bool		print;
 	int		seed = 0;
 
@@ -120,36 +119,16 @@ int main(int argc, char** argv)
 		init_random(seed);
 	else {
 		printf("pid %d\n", getpid());
-		/* init_random(getpid()); */
-		init_random(15);
+		init_random(getpid());
 	}
 
 	/* printf("generating cfg...\n"); */
 	cfg = new_cfg(n, nsym, max_succ);
-	cfg2 = new_cfg(n, nsym, max_succ);
 
 	generate_cfg(cfg, n, max_succ);
 
 	/* printf("generating usedefs...\n"); */
 	generate_usedefs(cfg, n, nsym, nactive);
-
-  copy_cfg(cfg2, cfg);
-
-	/* printf("liveness...\n\n"); */
-
-  /* FILE *fp = fopen("input1.txt", "w+"); */
-	/* if (print) */
-	/* 	print_sets(cfg, fp); */
-
-	/* begin = sec(); */
-	/* liveness_seq(cfg2); */
-	/* end = sec(); */
-
-  /* fp = fopen("input2.txt", "w+"); */
-	/* if (print) */
-	/* 	print_sets(cfg2, fp); */
-
-	/* printf("T = %8.4lf s\n\n", end-begin); */
 
 	begin = sec();
 	liveness(cfg);
@@ -157,25 +136,10 @@ int main(int argc, char** argv)
 
 	printf("T = %8.4lf s\n\n", end-begin);
 
-  FILE *fp = fopen("output1.txt", "w+");
 	if (print)
-		print_sets(cfg, fp);
-
-  fp = fopen("output2.txt", "w+");
-	if (print)
-		print_sets(cfg2, fp);
-
-  system("diff output1.txt output2.txt");
-
-  /* FILE *fp = fopen("res.actual", "w+"); */
-	/* if (print) */
-	/* 	print_sets(cfg, fp); */
-  /*  */
-  /* fp = fopen("res.expected", "w+"); */
-	/* if (print) */
-	/* 	print_sets(cfg2, fp); */
+		print_sets(cfg, stdout);
 
 	free_cfg(cfg);
-	/* free_cfg(cfg2); */
+
 	return 0;
 }
