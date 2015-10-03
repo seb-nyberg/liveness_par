@@ -131,7 +131,7 @@ void computeIn(vertex_t* u, list_t* worklist)
 {
   size_t i;
   set_t* prev;
-  set_t* in;
+  /* set_t* in; */
   list_t* p;
   list_t* h;
   vertex_t* v;
@@ -141,19 +141,21 @@ void computeIn(vertex_t* u, list_t* worklist)
   for (i = 0; i < u->nsucc; ++i) {
     v = u->succ[i];
 
-    if (v != u) {
-
-      pthread_mutex_unlock(&u->mutex);
-
-      pthread_mutex_lock(&v->mutex);
-      memcpy(&in, &v->set[IN], sizeof(set_t*));
-      pthread_mutex_unlock(&v->mutex);
-
-      pthread_mutex_lock(&u->mutex);
-      or(u->set[OUT], u->set[OUT], in); // REQUIRES LOCK ON U AND SUCC
-    } else {
-      or(u->set[OUT], u->set[OUT], u->succ[i]->set[IN]); // REQUIRES LOCK ON U AND SUCC
-    }
+    or(u->set[OUT], u->set[OUT], u->succ[i]->set[IN]); // REQUIRES LOCK ON U AND SUCC
+    /* if (v != u) { */
+    /*  */
+    /*   #<{(| pthread_mutex_unlock(&u->mutex); |)}># */
+    /*  */
+    /*   #<{(| pthread_mutex_lock(&v->mutex); |)}># */
+    /*   #<{(| print_set(u->succ[i]->set[IN], stdout); |)}># */
+    /*   #<{(| print_set(in, stdout); |)}># */
+    /*   #<{(| pthread_mutex_unlock(&v->mutex); |)}># */
+    /*  */
+    /*   #<{(| pthread_mutex_lock(&u->mutex); |)}># */
+    /*   or(u->set[OUT], u->set[OUT], in); // REQUIRES LOCK ON U AND SUCC */
+    /* } else { */
+    /*   or(u->set[OUT], u->set[OUT], u->succ[i]->set[IN]); // REQUIRES LOCK ON U AND SUCC */
+    /* } */
   }
 
 

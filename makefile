@@ -5,8 +5,8 @@ CC		= gcc
 # CFLAGS		= -m64 -g -Wall -pedantic -Werror -std=c99
 # CFLAGS		= -O3 -maltivec -Wall -pedantic -std=c99
 # CFLAGS		= -O3 -Wall -pedantic -std=c99
-# CFLAGS      = -O3 -Wall -pedantic -std=c11 -m64 -pthread -D_GNU_SOURCE
-CFLAGS      = -g -Wall -pedantic -std=c11 -m64 -pthread -D_GNU_SOURCE
+CFLAGS      = -O3 -Wall -pedantic -std=c11 -m64 -pthread -D_GNU_SOURCE
+# CFLAGS      = -g -O3 -Wall -pedantic -std=c11 -m64 -pthread -D_GNU_SOURCE
 
 OBJS		= main.o list.o error.o random.o set.o dataflow.o
 
@@ -30,10 +30,10 @@ LDFLAGS		= -lpthread
 # P=0      # print
 
 # For debugging
-S=100 # the range of symbol values [0, n]
-V=100 # vertices in the graph
+S=100000 # the range of symbol values [0, n]
+V=100000 # vertices in the graph
 U=4   # successors for each vertex
-A=10  # max number of active (live) variables for a set
+A=100  # max number of active (live) variables for a set
 T=4   # threads
 P=0   # print
 

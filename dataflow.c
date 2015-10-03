@@ -19,6 +19,7 @@ typedef struct task_t	task_t;
 struct thrargs_t {
   list_t* worklist;
   size_t index;
+  size_t nsym;
 };
 
 /* cfg_t: a control flow graph. */
@@ -139,7 +140,7 @@ void computeIn(vertex_t* u, list_t* worklist)
   reset(u->set[OUT]);  // u is still locked here
 
   for (i = 0; i < u->nsucc; ++i) {
-    /* v = u->succ[i]; */
+    v = u->succ[i];
 
     or(u->set[OUT], u->set[OUT], u->succ[i]->set[IN]); // REQUIRES LOCK ON U AND SUCC
     /* if (v != u) { */
@@ -206,31 +207,73 @@ void computeIn(vertex_t* u, list_t* worklist)
 void* work(void *args)
 {
   list_t* worklist;
-  /* size_t index; */
+  size_t i;
   vertex_t* u;
+  vertex_t* v;
+  set_t* prev;
+  set_t* in;
+  list_t* p;
+  list_t* h;
+
   /* size_t nvertex; */
 
   worklist = ((thrargs_t*) args)->worklist;
   /* index    = ((thrargs_t*) args)->index; */
   /* nvertex = 0; */
+  in = new_set(((thrargs_t*) args)->nsym);
 
   while ((u = remove_first(&worklist)) != NULL) {
 
     /* nvertex++; */
+    pthread_mutex_lock(&u->mutex);
+    u->listed = false;
 
-    if (u != NULL) {
+    reset(u->set[OUT]);
+
+    pthread_mutex_unlock(&u->mutex);
+
+    for (i = 0; i < u->nsucc; ++i) {
+      v = u->succ[i];
+
       pthread_mutex_lock(&u->mutex);
-      if (u->listed) {
-        u->listed = false;
-        computeIn(u, worklist); // u is unlocked inside computeIn
-      } else {
-        pthread_mutex_unlock(&u->mutex);
-      }
+      or(u->set[OUT], u->set[OUT], v->set[IN]);
+      pthread_mutex_unlock(&u->mutex);
     }
-    else {
-      break;
+
+
+    pthread_mutex_lock(&u->mutex);
+    // this is done to save memory
+    prev = u->prev;       // get the pointer to the old, useless in-set
+    u->prev = u->set[IN]; // save the current in-set in prev
+    u->set[IN] = prev;    // get a pointer to the old in-set for writing new data
+
+    // now the pointer u->set[IN] points to the previously used in-set
+    // and that memory is ready to be recycled in the liveness analysis
+    propagate(u->set[IN], u->set[OUT], u->set[DEF], u->set[USE]);
+    pthread_mutex_unlock(&u->mutex);
+
+
+    // if there are predecessors which need updating
+    //                     and the in-edges have changed
+    if (u->pred != NULL && !equal(u->prev, u->set[IN])) {
+
+      p = h = u->pred;
+      do {
+        v = p->data;
+        pthread_mutex_lock(&v->mutex);
+        if (!v->listed) {
+          v->listed = true;
+
+          insert_last(&worklist, (vertex_t *)v);
+        }
+        pthread_mutex_unlock(&v->mutex);
+
+        p = p->succ;
+      } while (p != h);
     }
   }
+
+  /* free_set(in); */
 
   pthread_exit(NULL);
 }
@@ -256,6 +299,7 @@ void liveness(cfg_t* cfg)
     ts[i]->worklist = malloc(sizeof(list_t*));
     ts[i]->worklist = NULL;
     ts[i]->index = i;
+    ts[i]->nsym = cfg->nsymbol;
   }
   
   // create initial worklists by iterating from
