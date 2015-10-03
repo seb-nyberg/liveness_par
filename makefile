@@ -22,20 +22,20 @@ LDFLAGS		= -lpthread
 # P=0
 
 # The ultimate test
-S=100000 # the range of symbol values [0, n]
-V=100000 # vertices in the graph
-U=4 		 # successors
-A=1000   # nactive (different values of entries in the sets)
-T=4      # threads
-P=0      # print
+# S=100000 # the range of symbol values [0, n]
+# V=100000 # vertices in the graph
+# U=4 		 # successors
+# A=1000   # nactive (different values of entries in the sets)
+# T=4      # threads
+# P=0      # print
 
 # For debugging
-# S=1000 # the range of symbol values [0, n]
-# V=1000 # vertices in the graph
-# U=4   # successors for each vertex
-# A=100  # max number of active (live) variables for a set
-# T=4   # threads
-# P=0   # print
+S=100 # the range of symbol values [0, n]
+V=100 # vertices in the graph
+U=4   # successors for each vertex
+A=10  # max number of active (live) variables for a set
+T=4   # threads
+P=0   # print
 
 all: $(OBJS)	
 	$(CC) $(CFLAGS) $(OBJS) $(LDFLAGS) -o $(OUT)
