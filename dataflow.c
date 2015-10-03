@@ -4,37 +4,40 @@
 #include <stdlib.h>
 #include <inttypes.h>
 #include <pthread.h>
+#include <string.h>
+#include <errno.h>
 #include "dataflow.h"
 #include "error.h"
 #include "list.h"
 #include "set.h"
 
+typedef struct thrargs_t thrargs_t;
 typedef struct vertex_t	vertex_t;
 typedef struct task_t	task_t;
 
-pthread_mutex_t worklist_mutex;
-
-typedef struct thread_struct {
+/* targs_t: thread args */
+struct thrargs_t {
   list_t* worklist;
   size_t index;
-} thread_struct;
+};
 
 /* cfg_t: a control flow graph. */
 struct cfg_t {
-  size_t			nvertex;	/* number of vertices		*/
-  size_t			nsymbol;	/* width of bitvectors		*/
-  vertex_t*		vertex;		/* array of vertex		*/
+	size_t			nvertex;	/* number of vertices		*/
+	size_t			nsymbol;	/* width of bitvectors		*/
+	vertex_t*		vertex;		/* array of vertex		*/
 };
 
 /* vertex_t: a control flow graph vertex. */
 struct vertex_t {
-  size_t			index;		/* can be used for debugging	*/
-  set_t*			set[NSETS];	/* live in from this vertex	*/
-  set_t*			prev;		/* alternating with set[IN]	*/
-  size_t			nsucc;		/* number of successor vertices */
-  vertex_t**		succ;		/* successor vertices 		*/
-  list_t*			pred;		/* predecessor vertices		*/
-  bool			listed;		/* on worklist			*/
+	size_t			index;		/* can be used for debugging	*/
+	set_t*			set[NSETS];	/* live in from this vertex	*/
+	set_t*			prev;		/* alternating with set[IN]	*/
+                      /* this is used to check if IN has changed */
+	size_t			nsucc;		/* number of successor vertices */
+	vertex_t**		succ;		/* successor vertices 		*/
+	list_t*			pred;		/* predecessor vertices		*/
+	bool			listed;		/* on worklist			*/
   pthread_mutex_t mutex;
 };
 
@@ -43,140 +46,188 @@ static void init_vertex(vertex_t* v, size_t index, size_t nsymbol, size_t max_su
 
 cfg_t* new_cfg(size_t nvertex, size_t nsymbol, size_t max_succ)
 {
-  size_t		i;
-  cfg_t*		cfg;
+	size_t		i;
+	cfg_t*		cfg;
 
-  cfg = calloc(1, sizeof(cfg_t));
-  if (cfg == NULL)
-    error("out of memory");
+	cfg = calloc(1, sizeof(cfg_t));
+	if (cfg == NULL)
+		error("out of memory");
 
-  cfg->nvertex = nvertex;
-  cfg->nsymbol = nsymbol;
+	cfg->nvertex = nvertex;
+	cfg->nsymbol = nsymbol;
 
-  cfg->vertex = calloc(nvertex, sizeof(vertex_t));
-  if (cfg->vertex == NULL)
-    error("out of memory");
+	cfg->vertex = calloc(nvertex, sizeof(vertex_t));
+	if (cfg->vertex == NULL)
+		error("out of memory");
 
-  for (i = 0; i < nvertex; i += 1)
-    init_vertex(&cfg->vertex[i], i, nsymbol, max_succ);
+	for (i = 0; i < nvertex; i += 1)
+		init_vertex(&cfg->vertex[i], i, nsymbol, max_succ);
 
-  return cfg;
+	return cfg;
 }
 
 static void clean_vertex(vertex_t* v)
 {
-  int		i;
+	int		i;
 
-  for (i = 0; i < NSETS; i += 1)
-    free_set(v->set[i]);
-  free_set(v->prev);
-  free(v->succ);
-  free_list(&v->pred);
+	for (i = 0; i < NSETS; i += 1)
+		free_set(v->set[i]);
+	free_set(v->prev);
+	free(v->succ);
+	free_list(&v->pred);
 }
 
 static void init_vertex(vertex_t* v, size_t index, size_t nsymbol, size_t max_succ)
 {
-  int		i;
+	int		i;
 
-  v->index	= index;
+	v->index	= index;
+	v->succ		= calloc(max_succ, sizeof(vertex_t*));
+
   pthread_mutex_init(&v->mutex, NULL);
-  v->succ		= calloc(max_succ, sizeof(vertex_t*));
 
-  if (v->succ == NULL)
-    error("out of memory");
+	if (v->succ == NULL)
+		error("out of memory");
+	
+	for (i = 0; i < NSETS; i += 1)
+		v->set[i] = new_set(nsymbol);
 
-  for (i = 0; i < NSETS; i += 1)
-    v->set[i] = new_set(nsymbol);
-
-  v->prev = new_set(nsymbol);
+	v->prev = new_set(nsymbol);
 }
 
 void free_cfg(cfg_t* cfg)
 {
-  size_t		i;
+	size_t		i;
 
-  for (i = 0; i < cfg->nvertex; i += 1)
-    clean_vertex(&cfg->vertex[i]);
-  free(cfg->vertex);
-  free(cfg);
+	for (i = 0; i < cfg->nvertex; i += 1)
+		clean_vertex(&cfg->vertex[i]);
+	free(cfg->vertex);
+	free(cfg);
 }
 
 void connect(cfg_t* cfg, size_t pred, size_t succ)
 {
-  vertex_t*	u;
-  vertex_t*	v;
+	vertex_t*	u;
+	vertex_t*	v;
 
-  u = &cfg->vertex[pred];
-  v = &cfg->vertex[succ];
+	u = &cfg->vertex[pred];
+	v = &cfg->vertex[succ];
 
-  u->succ[u->nsucc++ ] = v;
-  insert_last(&v->pred, u);
+	u->succ[u->nsucc++ ] = v;
+	insert_last(&v->pred, u);
 }
 
 bool testbit(cfg_t* cfg, size_t v, set_type_t type, size_t index)
 {
-  return test(cfg->vertex[v].set[type], index);
+	return test(cfg->vertex[v].set[type], index);
 }
 
 void setbit(cfg_t* cfg, size_t v, set_type_t type, size_t index)
 {
-  set(cfg->vertex[v].set[type], index);
+	set(cfg->vertex[v].set[type], index);
 }
 
-void* split_work(void *args) {
-  vertex_t* u;
-  vertex_t* v;
+void computeIn(vertex_t* u, list_t* worklist)
+{
   size_t i;
   set_t* prev;
+  set_t* in;
   list_t* p;
   list_t* h;
+  vertex_t* v;
+
+  reset(u->set[OUT]);  // u is still locked here
+
+  for (i = 0; i < u->nsucc; ++i) {
+    v = u->succ[i];
+
+    if (v != u) {
+
+      pthread_mutex_unlock(&u->mutex);
+
+      pthread_mutex_lock(&v->mutex);
+      memcpy(&in, &v->set[IN], sizeof(set_t*));
+      pthread_mutex_unlock(&v->mutex);
+
+      pthread_mutex_lock(&u->mutex);
+      or(u->set[OUT], u->set[OUT], in); // REQUIRES LOCK ON U AND SUCC
+    } else {
+      or(u->set[OUT], u->set[OUT], u->succ[i]->set[IN]); // REQUIRES LOCK ON U AND SUCC
+    }
+  }
+
+
+  // this is done to save memory
+  prev = u->prev;       // get the pointer to the old, useless in-set
+  u->prev = u->set[IN]; // save the current in-set in prev
+  u->set[IN] = prev;    // get a pointer to the old in-set for writing new data
+
+  // now the pointer u->set[IN] points to the previously used in-set
+  // and that memory is ready to be recycled in the liveness analysis
+	propagate(u->set[IN], u->set[OUT], u->set[DEF], u->set[USE]);
+
+
+  // if there are predecessors which need updating
+  //                     and the in-edges have changed
+  if (u->pred != NULL && !equal(u->prev, u->set[IN])) {
+
+    // make sure that the predecessors update their in-sets
+
+    p = u->pred; // should I lock the pred list? hmmm
+
+    pthread_mutex_unlock(&u->mutex);
+    memcpy(&h, p, sizeof(vertex_t*)); 
+
+    v = p->data;
+
+    pthread_mutex_lock(&v->mutex);
+
+    do {
+      if (!v->listed) {
+        v->listed = true;
+        insert_last(&worklist, v);
+      }
+
+
+      pthread_mutex_unlock(&v->mutex);
+      p = p->succ; // UNLOCK OLD P AND TRY TO LOCK NEW P
+      v = p->data;
+      pthread_mutex_lock(&v->mutex);
+    } while (h != p);
+    pthread_mutex_unlock(&v->mutex);
+  } else {
+    pthread_mutex_unlock(&u->mutex);
+  }
+
+}
+
+void* work(void *args)
+{
   list_t* worklist;
+  /* size_t index; */
+  vertex_t* u;
+  /* size_t nvertex; */
 
-  worklist = (list_t*) args;
+  worklist = ((thrargs_t*) args)->worklist;
+  /* index    = ((thrargs_t*) args)->index; */
+  /* nvertex = 0; */
 
-  while (1) {
+  while ((u = remove_first(&worklist)) != NULL) {
 
-    u = remove_first(&worklist);
+    /* nvertex++; */
 
-    if (u == NULL) {
+    if (u != NULL) {
+      pthread_mutex_lock(&u->mutex);
+      if (u->listed) {
+        u->listed = false;
+        computeIn(u, worklist); // u is unlocked inside computeIn
+      } else {
+        pthread_mutex_unlock(&u->mutex);
+      }
+    }
+    else {
       break;
     }
-
-    pthread_mutex_lock(&u->mutex);
-    u->listed = false;
-    pthread_mutex_unlock(&u->mutex);
-
-    reset(u->set[OUT]);
-
-    for (i = 0; i < u->nsucc; ++i){
-      v = u->succ[i];
-      or(u->set[OUT], u->set[OUT], u->succ[i]->set[IN]);
-    }
-
-    prev = u->prev;
-    u->prev = u->set[IN];
-    u->set[IN] = prev;
-
-    /* in our case liveness information... */
-    propagate(u->set[IN], u->set[OUT], u->set[DEF], u->set[USE]);
-
-    if (u->pred != NULL && !equal(u->prev, u->set[IN])) {
-      p = h = u->pred;
-      do {
-        v = p->data;
-        if (!v->listed) {
-          pthread_mutex_lock(&v->mutex);
-          v->listed = true;
-          pthread_mutex_unlock(&v->mutex);
-
-          insert_last(&worklist, (vertex_t *)v);
-        }
-
-        p = p->succ;
-
-      } while (p != h);
-    }
-
   }
 
   pthread_exit(NULL);
@@ -184,97 +235,74 @@ void* split_work(void *args) {
 
 void liveness(cfg_t* cfg)
 {
-  vertex_t*	u;
-  size_t		i;
-  size_t t;
-  list_t**		worklists;
-  /* list_t*     worklist; */
-  size_t rc;
-  size_t nthread = 8;
-  pthread_t threads[nthread];
+	vertex_t*   u;
+	size_t      i;
+	size_t      j;
+  size_t      rc;
+  size_t      nthread;
+  size_t      blocksize;
+  thrargs_t** ts;
+  pthread_t*  threads;
 
-  worklists = (list_t**) malloc(nthread * sizeof(list_t*));
+  nthread = 8;
+  ts = malloc(nthread * sizeof(thrargs_t*));
+  threads = malloc(nthread * sizeof(pthread_t));
 
-  for (t = 0; t < nthread; ++t) {
-    worklists[t] = malloc(sizeof(list_t*));
-    worklists[t] = NULL;
+  // initialize the thread arguments
+  for (i = 0; i < nthread; ++i) {
+    ts[i] = malloc(sizeof(thrargs_t*));
+    ts[i]->worklist = malloc(sizeof(list_t*));
+    ts[i]->worklist = NULL;
+    ts[i]->index = i;
   }
-
-  // This might possibly be faster because of the order of vertices
-  /* for (t = 0; t < nthread; t++) { */
-  /*   for (i = cfg->nvertex / nthread * t; i < cfg->nvertex / nthread * (t + 1); i++){ */
-  /*     u = &cfg->vertex[i]; */
-  /*     insert_last(&worklists[t], u); */
-  /*     u->listed = true; */
-  /*   } */
-  /* } */
-
-  for (i = 0; i < cfg->nvertex; ++i) {
-    u = &cfg->vertex[i];
-
-    insert_last(&worklists[i%nthread], u);
-
-    /* insert_last(&worklist, u); */
-    u->listed = true;
-  }
-
-  /* pthread_mutex_init(&worklist_mutex, NULL); */
+  
+  // create initial worklists by iterating from
+  // [0, blocksize-1], ..., [(nthread - 1) * blocksize, nthread * blocksize]
+  blocksize = cfg->nvertex / nthread;
 
   for (i = 0; i < nthread; ++i) {
-    printf("Starting thread %zu\n", i);
+    for (j = blocksize * i; j < blocksize * (i + 1); j++) {
+      u = &cfg->vertex[j];
 
-    rc = pthread_create(&threads[i], NULL, split_work, worklists[i]);
-    /* Create a new thread which does work */
-    if (rc) {
+      insert_last(&ts[i]->worklist, u);
+      u->listed = true;
+    }
+  }
+
+  // start threads
+  for (i = 0; i < nthread; ++i) {
+    rc = pthread_create(&threads[i], NULL, work, ts[i]);
+
+    if (rc)
       error("failed to create thread");
-    }
   }
 
-  /* Join threads... */
-  for (t = 0; t < nthread; ++t) {
-    rc = pthread_join(threads[t], NULL);
-    if (rc) {
-      error("failed to join threads");
-    }
-  }
+  // join threads
+  for (i = 0; i < nthread; ++i) {
+    rc = pthread_join(threads[i], NULL);
 
-  /* for (i = 0; i < nthread; ++i) { */
-  /*  */
-  /*   rc = pthread_create(&threads[i], NULL, work, worklist); */
-  /*   Create a new thread which does work */
-  /*   if (rc) { */
-  /*     error("failed to create thread"); */
-  /*   } */
-  /* } */
-  /*  */
-  // Join threads...
-  /* for (t = 0; t < nthread; ++t) { */
-  /*   rc = pthread_join(threads[t], NULL); */
-  /*   if (rc) { */
-  /*     error("failed to join threads"); */
-  /*   } */
-  /* } */
-  /* pthread_mutex_destroy(&worklist_mutex); */
+    if(rc)
+      error("failed to join thread");
+  }
 
 }
 
 void print_sets(cfg_t* cfg, FILE *fp)
 {
-  size_t		i;
-  vertex_t*	u;
+	size_t		i;
+	vertex_t*	u;
 
-  for (i = 0; i < cfg->nvertex; ++i) {
-    u = &cfg->vertex[i]; 
-    fprintf(fp, "use[%zu] = ", u->index);
-    print_set(u->set[USE], fp);
-    fprintf(fp, "def[%zu] = ", u->index);
-    print_set(u->set[DEF], fp);
-    fputc('\n', fp);
-    fprintf(fp, "in[%zu] = ", u->index);
-    print_set(u->set[IN], fp);
-    fprintf(fp, "out[%zu] = ", u->index);
-    print_set(u->set[OUT], fp);
-    fputc('\n', fp);
-  }
+	for (i = 0; i < cfg->nvertex; ++i) {
+		u = &cfg->vertex[i]; 
+		fprintf(fp, "use[%zu] = ", u->index);
+		print_set(u->set[USE], fp);
+		fprintf(fp, "def[%zu] = ", u->index);
+		print_set(u->set[DEF], fp);
+		fputc('\n', fp);
+		fprintf(fp, "in[%zu] = ", u->index);
+		print_set(u->set[IN], fp);
+		fprintf(fp, "out[%zu] = ", u->index);
+		print_set(u->set[OUT], fp);
+		fputc('\n', fp);
+	}
 }
-
