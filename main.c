@@ -136,9 +136,9 @@ int main(int argc, char** argv)
 
 	printf("T = %8.4lf s\n\n", end-begin);
 
-	if (print)
-		print_sets(cfg, stdout);
-
-	free_cfg(cfg);
+	/* if (print) */
+	/* 	print_sets(cfg, stdout); */
+  /*  */
+	/* free_cfg(cfg); */
 	return 0;
 }

@@ -5,6 +5,7 @@
 #include <inttypes.h>
 #include <pthread.h>
 #include <string.h>
+#include <errno.h>
 #include "dataflow.h"
 #include "error.h"
 #include "list.h"
@@ -37,6 +38,7 @@ struct vertex_t {
 	vertex_t**		succ;		/* successor vertices 		*/
 	list_t*			pred;		/* predecessor vertices		*/
 	bool			listed;		/* on worklist			*/
+  pthread_mutex_t mutex;
 };
 
 static void clean_vertex(vertex_t* v);
@@ -81,6 +83,8 @@ static void init_vertex(vertex_t* v, size_t index, size_t nsymbol, size_t max_su
 
 	v->index	= index;
 	v->succ		= calloc(max_succ, sizeof(vertex_t*));
+
+  pthread_mutex_init(&v->mutex, NULL);
 
 	if (v->succ == NULL)
 		error("out of memory");
@@ -127,16 +131,32 @@ void computeIn(vertex_t* u, list_t* worklist)
 {
   size_t i;
   set_t* prev;
+  set_t* in;
   list_t* p;
   list_t* h;
   vertex_t* v;
 
-  reset(u->set[OUT]);  //REQUIRES LOCK
+  reset(u->set[OUT]);  // u is still locked here
 
-  for (i = 0; i < u->nsucc; ++i) { //REQUIRES LOCK
-    // LOCK u->succ[i] 
-    or(u->set[OUT], u->set[OUT], u->succ[i]->set[IN]); // REQUIRES LOCK ON U AND SUCC
+  for (i = 0; i < u->nsucc; ++i) {
+
+    v = u->succ[i];
+
+    if (v != u) {
+
+      pthread_mutex_unlock(&u->mutex);
+
+      pthread_mutex_lock(&v->mutex);
+      memcpy(&in, &v->set[IN], sizeof(set_t*));
+      pthread_mutex_unlock(&v->mutex);
+
+      pthread_mutex_lock(&u->mutex);
+      or(u->set[OUT], u->set[OUT], in); // REQUIRES LOCK ON U AND SUCC
+    } else {
+      or(u->set[OUT], u->set[OUT], u->succ[i]->set[IN]); // REQUIRES LOCK ON U AND SUCC
+    }
   }
+
 
   // this is done to save memory
   prev = u->prev;       // get the pointer to the old, useless in-set
@@ -147,14 +167,21 @@ void computeIn(vertex_t* u, list_t* worklist)
   // and that memory is ready to be recycled in the liveness analysis
 	propagate(u->set[IN], u->set[OUT], u->set[DEF], u->set[USE]);
 
+
   // if there are predecessors which need updating
   //                     and the in-edges have changed
   if (u->pred != NULL && !equal(u->prev, u->set[IN])) {
 
     // make sure that the predecessors update their in-sets
-    p = u->pred; // REQUIRES LOCK ON u->pred
+
+    p = u->pred; // should I lock the pred list? hmmm
+
+    pthread_mutex_unlock(&u->mutex);
     memcpy(&h, p, sizeof(vertex_t*)); 
+
     v = p->data;
+
+    pthread_mutex_lock(&v->mutex);
 
     do {
       if (!v->listed) {
@@ -162,10 +189,15 @@ void computeIn(vertex_t* u, list_t* worklist)
         insert_last(&worklist, v);
       }
 
+
+      pthread_mutex_unlock(&v->mutex);
       p = p->succ; // UNLOCK OLD P AND TRY TO LOCK NEW P
       v = p->data;
+      pthread_mutex_lock(&v->mutex);
     } while (h != p);
-
+    pthread_mutex_unlock(&v->mutex);
+  } else {
+    pthread_mutex_unlock(&u->mutex);
   }
 
 }
@@ -173,24 +205,25 @@ void computeIn(vertex_t* u, list_t* worklist)
 void* work(void *args)
 {
   list_t* worklist;
-  size_t index;
+  /* size_t index; */
   vertex_t* u;
-  size_t nvertex;
+  /* size_t nvertex; */
 
   worklist = ((thrargs_t*) args)->worklist;
-  index    = ((thrargs_t*) args)->index;
-  nvertex = 0;
+  /* index    = ((thrargs_t*) args)->index; */
+  /* nvertex = 0; */
 
-  while (1) {
+  while ((u = remove_first(&worklist)) != NULL) {
 
-    // LOCK U
-    u = remove_first(&worklist);
-    nvertex++;
+    /* nvertex++; */
 
     if (u != NULL) {
+      pthread_mutex_lock(&u->mutex);
       if (u->listed) {
         u->listed = false;
-        computeIn(u, worklist);
+        computeIn(u, worklist); // u is unlocked inside computeIn
+      } else {
+        pthread_mutex_unlock(&u->mutex);
       }
     }
     else {
@@ -212,7 +245,7 @@ void liveness(cfg_t* cfg)
   thrargs_t** ts;
   pthread_t*  threads;
 
-  nthread = 1;
+  nthread = 16;
   ts = malloc(nthread * sizeof(thrargs_t*));
   threads = malloc(nthread * sizeof(pthread_t));
 
