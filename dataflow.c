@@ -45,11 +45,11 @@ static void clean_vertex(vertex_t* v);
 static void init_vertex(vertex_t* v, size_t index, size_t nsymbol, size_t max_succ);
 
 //TODO: COMMENT OUT BEFORE SENDING
-/* void copy_cfg(cfg_t* dest, cfg_t* src) { */
-/*   for (size_t i = 0; i < dest->nvertex; ++i) { */
-/*     src->vertex[i] = dest->vertex[i]; */
-/*   } */
-/* } */
+void copy_cfg(cfg_t* dest, cfg_t* src) {
+  for (size_t i = 0; i < dest->nvertex; ++i) {
+    src->vertex[i] = dest->vertex[i];
+  }
+}
 
 cfg_t* new_cfg(size_t nvertex, size_t nsymbol, size_t max_succ)
 {
