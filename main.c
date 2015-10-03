@@ -132,8 +132,8 @@ int main(int argc, char** argv)
 
 	/* printf("generating usedefs...\n"); */
 	generate_usedefs(cfg, n, nsym, nactive);
-
-  copy_cfg(cfg2, cfg);
+  /*  */
+  /* copy_cfg(cfg2, cfg); */
 
 	/* printf("liveness...\n\n"); */
 
