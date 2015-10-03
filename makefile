@@ -30,12 +30,12 @@ LDFLAGS		= -lpthread
 # P=0      # print
 
 # For debugging
-S=10000 # the range of symbol values [0, n]
-V=10000 # vertices in the graph
+S=1000 # the range of symbol values [0, n]
+V=1000 # vertices in the graph
 U=4   # successors for each vertex
 A=100  # max number of active (live) variables for a set
 T=4   # threads
-P=1   # print
+P=0   # print
 
 all: $(OBJS)	
 	$(CC) $(CFLAGS) $(OBJS) $(LDFLAGS) -o $(OUT)

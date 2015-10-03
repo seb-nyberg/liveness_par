@@ -141,15 +141,15 @@ int main(int argc, char** argv)
 	/* if (print) */
 	/* 	print_sets(cfg, fp); */
 
-	begin = sec();
-	liveness_seq(cfg2);
-	end = sec();
+	/* begin = sec(); */
+	/* liveness_seq(cfg2); */
+	/* end = sec(); */
 
   /* fp = fopen("input2.txt", "w+"); */
 	/* if (print) */
 	/* 	print_sets(cfg2, fp); */
 
-	printf("T = %8.4lf s\n\n", end-begin);
+	/* printf("T = %8.4lf s\n\n", end-begin); */
 
 	begin = sec();
 	liveness(cfg);
