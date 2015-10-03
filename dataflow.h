@@ -20,9 +20,12 @@ void	free_cfg(cfg_t*);
 
 void 	connect(cfg_t* cfg, size_t pred, size_t succ);
 void	liveness(cfg_t*);
+void	liveness_seq(cfg_t*);
 
 bool	testbit(cfg_t*, size_t vertex, set_type_t type, size_t index);
 void	setbit(cfg_t*, size_t vertex, set_type_t type, size_t index);
 void	print_sets(cfg_t*, FILE*);
+
+void copy_cfg(cfg_t*, cfg_t*);
 
 #endif

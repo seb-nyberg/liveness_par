@@ -44,6 +44,13 @@ struct vertex_t {
 static void clean_vertex(vertex_t* v);
 static void init_vertex(vertex_t* v, size_t index, size_t nsymbol, size_t max_succ);
 
+//TODO: COMMENT OUT BEFORE SENDING
+/* void copy_cfg(cfg_t* dest, cfg_t* src) { */
+/*   for (size_t i = 0; i < dest->nvertex; ++i) { */
+/*     src->vertex[i] = dest->vertex[i]; */
+/*   } */
+/* } */
+
 cfg_t* new_cfg(size_t nvertex, size_t nsymbol, size_t max_succ)
 {
 	size_t		i;
@@ -139,7 +146,6 @@ void computeIn(vertex_t* u, list_t* worklist)
   reset(u->set[OUT]);  // u is still locked here
 
   for (i = 0; i < u->nsucc; ++i) {
-
     v = u->succ[i];
 
     if (v != u) {
@@ -245,7 +251,7 @@ void liveness(cfg_t* cfg)
   thrargs_t** ts;
   pthread_t*  threads;
 
-  nthread = 16;
+  nthread = 8;
   ts = malloc(nthread * sizeof(thrargs_t*));
   threads = malloc(nthread * sizeof(pthread_t));
 
@@ -286,6 +292,57 @@ void liveness(cfg_t* cfg)
       error("failed to join thread");
   }
 
+}
+
+void liveness_seq(cfg_t* cfg)
+{
+	vertex_t*	u;
+	vertex_t*	v;
+	set_t*		prev;
+	size_t		i;
+	size_t		j;
+	list_t*		worklist;
+	list_t*		p;
+	list_t*		h;
+
+	worklist = NULL;
+
+	for (i = 0; i < cfg->nvertex; ++i) {
+		u = &cfg->vertex[i];
+
+		insert_last(&worklist, u);
+		u->listed = true;
+	}
+
+	while ((u = remove_first(&worklist)) != NULL) {
+		u->listed = false;
+
+		reset(u->set[OUT]);
+
+		for (j = 0; j < u->nsucc; ++j)
+			or(u->set[OUT], u->set[OUT], u->succ[j]->set[IN]);
+
+		prev = u->prev;
+		u->prev = u->set[IN];
+		u->set[IN] = prev;
+
+		/* in our case liveness information... */
+		propagate(u->set[IN], u->set[OUT], u->set[DEF], u->set[USE]);
+
+		if (u->pred != NULL && !equal(u->prev, u->set[IN])) {
+			p = h = u->pred;
+			do {
+				v = p->data;
+				if (!v->listed) {
+					v->listed = true;
+					insert_last(&worklist, v);
+				}
+
+				p = p->succ;
+
+			} while (p != h);
+		}
+	}
 }
 
 void print_sets(cfg_t* cfg, FILE *fp)
