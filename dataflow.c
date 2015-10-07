@@ -38,7 +38,7 @@ struct vertex_t {
 	size_t			nsucc;		/* number of successor vertices */
 	vertex_t**		succ;		/* successor vertices 		*/
 	list_t*			pred;		/* predecessor vertices		*/
-	atomic_bool			listed;		/* on worklist			*/
+	bool listed;		/* on worklist			*/
   pthread_mutex_t mutex;
 };
 
