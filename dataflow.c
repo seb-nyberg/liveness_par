@@ -39,7 +39,7 @@ struct vertex_t {
 	size_t			nsucc;		/* number of successor vertices */
 	vertex_t**		succ;		/* successor vertices 		*/
 	list_t*			pred;		/* predecessor vertices		*/
-	bool			listed;		/* on worklist			*/
+	atomic_bool			listed;		/* on worklist			*/
   pthread_mutex_t mutex;
 };
 
@@ -189,10 +189,11 @@ void* work(void *args)
 
       pthread_mutex_unlock(&u->mutex);
 
-      p = h = u->pred;
+      p = u->pred;
       do {
         v = p->data;
         pthread_mutex_lock(&v->mutex);
+        memcpy(&h, &v, sizeof(vertex_t*));
         if (!v->listed) {
           v->listed = true;
 
@@ -206,8 +207,6 @@ void* work(void *args)
       pthread_mutex_unlock(&u->mutex);
     }
   }
-
-  /* free_set(in); */
 
   pthread_exit(NULL);
 }
