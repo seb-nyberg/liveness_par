@@ -3,7 +3,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <inttypes.h>
-#include <stdatomic.h>
 #include <pthread.h>
 #include <string.h>
 #include <errno.h>
