@@ -14,21 +14,6 @@ OUT		= live
 
 LDFLAGS		= -lpthread
 
-# S=100000
-# V=100000
-# U=4
-# A=1000
-# T=4
-# P=0
-
-# The ultimate test
-S=100000 # the range of symbol values [0, n]
-V=100000 # vertices in the graph
-U=4 		 # successors
-A=1000   # nactive (different values of entries in the sets)
-T=4      # threads
-P=0      # print
-
 # For debugging
 #S=100 # the range of symbol values [0, n]
 #V=100 # vertices in the graph
@@ -37,11 +22,34 @@ P=0      # print
 #T=4   # threads
 #P=0   # print
 
+# For debugging
+S2=10000 # the range of symbol values [0, n]
+V2=10000 # vertices in the graph
+U2=4     # successors for each vertex
+A2=1000  # max number of active (live) variables for a set
+T2=4     # threads
+P2=0     # print
+
+# The ultimate test
+S3=100000 # the range of symbol values [0, n]
+V3=100000 # vertices in the graph
+U3=4 		  # successors
+A3=1000   # nactive (different values of entries in the sets)
+T3=4      # threads
+P3=0      # print
+
 all: $(OBJS)	
 	$(CC) $(CFLAGS) $(OBJS) $(LDFLAGS) -o $(OUT)
 
-run:
+
+test:
 	./$(OUT) $(S) $(V) $(U) $(A) $(T) $(P)
+
+run:
+	./$(OUT) $(S2) $(V2) $(U2) $(A2) $(T2) $(P2)
+
+full:
+	./$(OUT) $(S3) $(V3) $(U3) $(A3) $(T3) $(P3)
 	
 valgrind:
 	valgrind --read-var-info=yes --tool=helgrind ./$(OUT) $(S) $(V) $(U) $(A) $(T) $(P) $(L)

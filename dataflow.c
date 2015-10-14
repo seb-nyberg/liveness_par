@@ -19,6 +19,7 @@ typedef struct task_t	task_t;
 struct thrargs_t {
   list_t* worklist;
   size_t index;
+  size_t nsym;
 };
 
 /* cfg_t: a control flow graph. */
@@ -37,7 +38,7 @@ struct vertex_t {
 	size_t			nsucc;		/* number of successor vertices */
 	vertex_t**		succ;		/* successor vertices 		*/
 	list_t*			pred;		/* predecessor vertices		*/
-	bool			listed;		/* on worklist			*/
+	bool listed;		/* on worklist			*/
   pthread_mutex_t mutex;
 };
 
@@ -127,108 +128,82 @@ void setbit(cfg_t* cfg, size_t v, set_type_t type, size_t index)
 	set(cfg->vertex[v].set[type], index);
 }
 
-void computeIn(vertex_t* u, list_t* worklist)
-{
-  size_t i;
-  set_t* prev;
-  /* set_t* in; */
-  list_t* p;
-  list_t* h;
-  vertex_t* v;
-
-  reset(u->set[OUT]);  // u is still locked here
-
-  for (i = 0; i < u->nsucc; ++i) {
-    /* v = u->succ[i]; */
-
-    or(u->set[OUT], u->set[OUT], u->succ[i]->set[IN]); // REQUIRES LOCK ON U AND SUCC
-    /* if (v != u) { */
-    /*  */
-    /*   #<{(| pthread_mutex_unlock(&u->mutex); |)}># */
-    /*  */
-    /*   #<{(| pthread_mutex_lock(&v->mutex); |)}># */
-    /*   #<{(| print_set(u->succ[i]->set[IN], stdout); |)}># */
-    /*   #<{(| print_set(in, stdout); |)}># */
-    /*   #<{(| pthread_mutex_unlock(&v->mutex); |)}># */
-    /*  */
-    /*   #<{(| pthread_mutex_lock(&u->mutex); |)}># */
-    /*   or(u->set[OUT], u->set[OUT], in); // REQUIRES LOCK ON U AND SUCC */
-    /* } else { */
-    /*   or(u->set[OUT], u->set[OUT], u->succ[i]->set[IN]); // REQUIRES LOCK ON U AND SUCC */
-    /* } */
-  }
-
-
-  // this is done to save memory
-  prev = u->prev;       // get the pointer to the old, useless in-set
-  u->prev = u->set[IN]; // save the current in-set in prev
-  u->set[IN] = prev;    // get a pointer to the old in-set for writing new data
-
-  // now the pointer u->set[IN] points to the previously used in-set
-  // and that memory is ready to be recycled in the liveness analysis
-	propagate(u->set[IN], u->set[OUT], u->set[DEF], u->set[USE]);
-
-
-  // if there are predecessors which need updating
-  //                     and the in-edges have changed
-  if (u->pred != NULL && !equal(u->prev, u->set[IN])) {
-
-    // make sure that the predecessors update their in-sets
-
-    p = u->pred; // should I lock the pred list? hmmm
-
-    pthread_mutex_unlock(&u->mutex);
-    memcpy(&h, p, sizeof(vertex_t*)); 
-
-    v = p->data;
-
-    pthread_mutex_lock(&v->mutex);
-
-    do {
-      if (!v->listed) {
-        v->listed = true;
-        insert_last(&worklist, v);
-      }
-
-
-      pthread_mutex_unlock(&v->mutex);
-      p = p->succ; // UNLOCK OLD P AND TRY TO LOCK NEW P
-      v = p->data;
-      pthread_mutex_lock(&v->mutex);
-    } while (h != p);
-    pthread_mutex_unlock(&v->mutex);
-  } else {
-    pthread_mutex_unlock(&u->mutex);
-  }
-
-}
-
 void* work(void *args)
 {
   list_t* worklist;
-  /* size_t index; */
+  size_t i;
   vertex_t* u;
+  vertex_t* v;
+  set_t* prev;
+  set_t* in;
+  list_t* p;
+  list_t* h;
+
   /* size_t nvertex; */
 
   worklist = ((thrargs_t*) args)->worklist;
   /* index    = ((thrargs_t*) args)->index; */
   /* nvertex = 0; */
+  in = new_set(((thrargs_t*) args)->nsym);
 
   while ((u = remove_first(&worklist)) != NULL) {
 
     /* nvertex++; */
+    pthread_mutex_lock(&u->mutex);
+    u->listed = false;
 
-    if (u != NULL) {
+    reset(u->set[OUT]);
+
+    pthread_mutex_unlock(&u->mutex);
+
+    for (i = 0; i < u->nsucc; ++i) {
+      v = u->succ[i];
+
+      // avoid nested locks
+      pthread_mutex_lock(&v->mutex);
+      memcpy(&in, &v->set[IN], sizeof(set_t)); 
+      pthread_mutex_unlock(&v->mutex);
+
       pthread_mutex_lock(&u->mutex);
-      if (u->listed) {
-        u->listed = false;
-        computeIn(u, worklist); // u is unlocked inside computeIn
-      } else {
-        pthread_mutex_unlock(&u->mutex);
-      }
+      or(u->set[OUT], u->set[OUT], in);
+      pthread_mutex_unlock(&u->mutex);
     }
-    else {
-      break;
+
+
+    pthread_mutex_lock(&u->mutex);
+    // this is done to save memory
+    prev = u->prev;       // get the pointer to the old, useless in-set
+    u->prev = u->set[IN]; // save the current in-set in prev
+    u->set[IN] = prev;    // get a pointer to the old in-set for writing new data
+
+
+    // now the pointer u->set[IN] points to the previously used in-set
+    // and that memory is ready to be recycled in the liveness analysis
+    propagate(u->set[IN], u->set[OUT], u->set[DEF], u->set[USE]);
+
+
+    // if there are predecessors which need updating
+    //                     and the in-edges have changed
+    if (u->pred != NULL && !equal(u->prev, u->set[IN])) {
+
+      pthread_mutex_unlock(&u->mutex);
+
+      p = u->pred;
+      do {
+        v = p->data;
+        pthread_mutex_lock(&v->mutex);
+        memcpy(&h, &v, sizeof(vertex_t*));
+        if (!v->listed) {
+          v->listed = true;
+
+          insert_last(&worklist, (vertex_t *)v);
+        }
+        pthread_mutex_unlock(&v->mutex);
+
+        p = p->succ;
+      } while (p != h);
+    } else {
+      pthread_mutex_unlock(&u->mutex);
     }
   }
 
@@ -256,6 +231,7 @@ void liveness(cfg_t* cfg)
     ts[i]->worklist = malloc(sizeof(list_t*));
     ts[i]->worklist = NULL;
     ts[i]->index = i;
+    ts[i]->nsym = cfg->nsymbol;
   }
   
   // create initial worklists by iterating from
